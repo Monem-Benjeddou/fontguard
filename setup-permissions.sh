@@ -2,7 +2,8 @@
 # Walks you through the permissions Fontguard needs, and checks each one took effect.
 # Safe to re-run at any time.
 FG="${FONTGUARD_HOME:-$HOME/.fontguard}"
-APP="${APP_DIR:-$HOME/Applications}/Fontguard.app"
+APP_DIR="${APP_DIR:-$([ -d /Applications/Fontguard.app ] && echo /Applications || echo "$HOME/Applications")}"
+APP="$APP_DIR/Fontguard.app"
 LABEL=com.fontguard.agent
 ok()   { printf '  \033[32m✓\033[0m %s\n' "$1"; }
 warn() { printf '  \033[33m!\033[0m %s\n' "$1"; }

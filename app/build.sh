@@ -6,7 +6,9 @@
 set -e
 cd "$(dirname "$0")"
 FG_HOME="${FONTGUARD_HOME:-$HOME/.fontguard}"
-APP="${APP_DIR:-$HOME/Applications}/Fontguard.app"
+# /Applications when writable: the Full Disk Access picker in System Settings shows it by default.
+APP_DIR="${APP_DIR:-$([ -w /Applications ] && echo /Applications || echo "$HOME/Applications")}"
+APP="$APP_DIR/Fontguard.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 swiftc -swift-version 5 -parse-as-library -O -target "$(uname -m)-apple-macos15.0" Fontguard.swift -o "$APP/Contents/MacOS/Fontguard"
@@ -46,5 +48,13 @@ cat > "$APP/Contents/Library/LaunchAgents/com.fontguard.agent.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
-codesign --force --sign - "$APP"
+# Sign with a stable local identity when one exists (install.sh creates "Fontguard Local Signing"), so
+# a Full Disk Access grant survives rebuilds. Ad-hoc signing ties the grant to the exact binary instead.
+IDENTITY="${SIGN_IDENTITY:-Fontguard Local Signing}"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""; then
+  codesign --force --sign "$IDENTITY" "$APP"
+else
+  codesign --force --sign - "$APP"
+  echo "note: signed ad-hoc; Full Disk Access must be granted again after every rebuild"
+fi
 echo "built $APP (uses $FG_HOME)"

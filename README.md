@@ -51,7 +51,7 @@ cd fontguard
 The installer:
 - copies the scanner and git hooks to `~/.fontguard`
 - keeps any hooks you already had: they still run after fontguard's
-- on macOS, builds `Fontguard.app` into `~/Applications` and registers it as a login item, so it runs in the background from the next login and appears under System Settings › General › Login Items. This needs the Xcode Command Line Tools: `xcode-select --install`
+- on macOS, builds `Fontguard.app` into `/Applications` (or `~/Applications` if that isn't writable) and registers it as a login item, so it runs in the background from the next login and appears under System Settings › General › Login Items. This needs the Xcode Command Line Tools: `xcode-select --install`
 - runs the permissions helper
 
 Linux, or hooks only: `./install.sh --hooks-only`
@@ -70,9 +70,24 @@ took effect. Run it again at any time.
 
 Access is granted to Fontguard.app alone, not to Python or your terminal.
 
+The app is signed ad-hoc, so macOS ties the grant to the exact build: after an
+upgrade, remove the old "Fontguard" entry from the Full Disk Access list and
+add the new one. To make grants survive upgrades, create a local signing
+identity once; `build.sh` uses it automatically when it exists:
+
+```sh
+openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes -keyout key.pem -out cert.pem \
+  -subj "/CN=Fontguard Local Signing" -addext "extendedKeyUsage=critical,codeSigning" -addext "keyUsage=critical,digitalSignature"
+openssl pkcs12 -export -out id.p12 -inkey key.pem -in cert.pem -passout pass:x -name "Fontguard Local Signing" \
+  -certpbe PBE-SHA1-3DES -keypbe PBE-SHA1-3DES -macalg sha1
+security import id.p12 -k ~/Library/Keychains/login.keychain-db -P x -T /usr/bin/codesign && rm key.pem cert.pem id.p12
+```
+
+If `security find-identity -v -p codesigning` doesn't list it afterwards, open Keychain Access, double-click the certificate, and set Code Signing to Always Trust.
+
 ## Using the app
 
-Open **Fontguard** from `~/Applications`, or click the shield in the menu bar.
+Open **Fontguard** from `/Applications`, or click the shield in the menu bar.
 
 - **Overview:** status, the protection switch, what's covered, recent catches.
 - **Scan:** drop a folder or choose one, then quarantine what it finds.

@@ -7,7 +7,7 @@
 set -e
 SRC="$(cd "$(dirname "$0")" && pwd)"
 FG="${FONTGUARD_HOME:-$HOME/.fontguard}"
-APP_DIR="${APP_DIR:-$HOME/Applications}"
+APP_DIR="${APP_DIR:-$([ -w /Applications ] && echo /Applications || echo "$HOME/Applications")}"
 LABEL=com.fontguard.agent
 PY=/usr/bin/python3
 [ -x "$PY" ] || PY=python3

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Remove fontguard. Quarantined files are kept unless you pass --purge.
 FG="${FONTGUARD_HOME:-$HOME/.fontguard}"
-APP_DIR="${APP_DIR:-$HOME/Applications}"
+APP_DIR="${APP_DIR:-$([ -d /Applications/Fontguard.app ] && echo /Applications || echo "$HOME/Applications")}"
 LABEL=com.fontguard.agent
 
 BIN="$APP_DIR/Fontguard.app/Contents/MacOS/Fontguard"
