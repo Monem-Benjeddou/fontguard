@@ -1,0 +1,13 @@
+[project]
+name = "fontguard"
+version = "1.1.0"
+description = "Detects and blocks the git-worm that hides in VS Code auto-run tasks and config files"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+
+[tool.ruff]
+line-length = 130
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "UP", "RUF", "PIE", "PLW", "FURB", "BLE", "FLY"]

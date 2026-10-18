@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+# Least privilege: CI only reads the code.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-15]
+    runs-on: ${{ matrix.os }}
+    steps:
+      # Pinned to a commit, not a tag: tags can be moved by whoever controls the action.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: python3 fontguard.py selftest
+      - run: python3 -m unittest discover -s tests -v
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: shellcheck -s sh install.sh uninstall.sh setup-permissions.sh app/build.sh hooks/fontguard-hook
+      - run: pipx run ruff==0.17.1 check fontguard.py tests/
+
+  app:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: APP_DIR="$RUNNER_TEMP" sh app/build.sh
+
+  # Fontguard scans itself: the repo must never contain what it blocks.
+  self-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - run: python3 fontguard.py scan .

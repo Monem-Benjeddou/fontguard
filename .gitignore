@@ -1,0 +1,6 @@
+quarantine/
+*.log
+status.json
+previous-hooks-path
+__pycache__/
+.DS_Store

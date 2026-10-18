@@ -1,0 +1,23 @@
+#!/bin/sh
+# fontguard git hook, installed as pre-commit, pre-push, post-checkout and post-merge.
+# Runs the check, then hands over to whatever hooks were in place before fontguard,
+# so installing it never silently disables existing hooks.
+HERE="$(cd "$(dirname "$0")" && pwd)"
+NAME="$(basename "$0")"
+PY=/usr/bin/python3
+[ -x "$PY" ] || PY=python3
+
+# pre-push receives the refs on stdin; keep a copy so the chained hook gets it too.
+INPUT=""
+[ "$NAME" = "pre-push" ] && INPUT="$(cat)"
+
+printf '%s\n' "$INPUT" | "$PY" "$HERE/../fontguard.py" hook "$NAME" "$@" || exit 1
+
+PREV="$(cat "$HERE/../previous-hooks-path" 2>/dev/null)"
+# Not `git rev-parse --git-path hooks`: with core.hooksPath set, that returns our own folder.
+LOCAL="$(git rev-parse --git-dir 2>/dev/null)/hooks"
+for d in "$PREV" "$LOCAL"; do
+  if [ -z "$d" ] || [ "$d" = "$HERE" ] || [ ! -x "$d/$NAME" ]; then continue; fi
+  printf '%s\n' "$INPUT" | "$d/$NAME" "$@" || exit $?
+done
+exit 0
