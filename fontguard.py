@@ -127,7 +127,7 @@ def check_tasks(text):
         tasks = json.loads(strip_jsonc(text)).get("tasks", [])
     except (ValueError, AttributeError):
         # Unparseable: fall back to the raw text so a broken file can't hide a task.
-        if "folderOpen" in text and re.search(r"/fonts/|\.(woff2?|ttf|otf|eot|lfk|lkf|llf|fml)\b", text, re.I):
+        if "folderOpen" in text and re.search(r"/fonts/|\.(woff2?|ttf|otf|eot|lfk|lkf|llf|fml)\b", text, re.IGNORECASE):
             return "unparseable folderOpen task that references a font file"
         tasks = [{"command": text, "runOptions": {"runOn": "folderOpen"}}] if "folderOpen" in text else []
     for t in tasks if isinstance(tasks, list) else []:
