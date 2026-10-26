@@ -32,7 +32,7 @@ import subprocess
 import sys
 import time
 
-__version__ = "1.1.0"
+__version__ = "1.1.1"
 
 FONT_EXTS = {".woff", ".woff2", ".ttf", ".otf", ".eot"}
 ODD_EXTS = {".lfk", ".lkf", ".llf", ".fml"}
@@ -41,13 +41,17 @@ CODE_EXTS = {".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx"}
 # Variant 2: payload appended to a config file after hundreds of tabs/spaces, off-screen in editors.
 # The gap must follow code on the same line (`);<tabs>payload`): deep indentation at the start
 # of a line is normal in formatted SDKs. Padded Markdown tables in doc comments end in "|".
-HIDDEN_CODE = re.compile(rb"\S[ \t]{150,}[^\s|*/][^\n]{19,}")
+HIDDEN_CODE = re.compile(rb"\S[ \t]{150,}[^\s|*/][^\n]{19,}"
+                         rb"|\A[ \t]{150,}\S[^\n]{19,}")  # whole file is the payload: no source starts with 150 blanks
 # Shorter padding (50+) is enough when the worm's bootstrap follows it; on a line of its own
 # only the unmistakable global/eval bootstrap counts.
 HIDDEN_BOOTSTRAP = re.compile(rb"\S[ \t]{50,}(global\s*(\.|\[)|eval\s*\(|require\s*\(|\(function\s*\()"
                               rb"|^[ \t]{50,}(global\s*(\.|\[)|eval\s*\()", re.MULTILINE)
-# Loader, C2s and campaign markers (ours: 95.135.181.151; the published write-up: 166.88.54.158).
-LOADER = re.compile(rb"npm-ws|95\.135\.181\.151|166\.88\.54\.158|trongrid\.io|bsc-dataseed|_\$_1e42"
+# Loader, C2s and campaign markers (ours: 95.135.181.151, plus the four seen Sep-Oct 2026;
+# the published write-up: 166.88.54.158).
+C2 = (r"95\.135\.181\.151|166\.88\.54\.158|193\.247\.144\.38|194\.11\.226\.41"
+      r"|166\.88\.134\.75|91\.218\.183\.174")
+LOADER = re.compile(rb"npm-ws|" + C2.encode() + rb"|trongrid\.io|bsc-dataseed|_\$_1e42"
                     rb"|global\s*\[\s*['\"](_V|_t_t)['\"]\s*\]|global\.i\s*=\s*['\"]A\d")
 # A committed workspace setting that switches folderOpen auto-run back on.
 AUTO_TASKS_ON = re.compile(rb"\"task\.allowAutomaticTasks\"\s*:\s*(true|\"on\")")
@@ -60,11 +64,14 @@ SKIP_PATHS = {"/System", "/dev", "/Volumes", "/private/var", "/cores", QUARANTIN
 SKIP_BUNDLES = (".app", ".framework", ".bundle", ".xcframework", ".appex")
 
 # Process rules: payload files rotate, but the running worm behaves the same way.
-RUNTIMES = ("node", "python", "osascript", "curl", "deno", "bun")
+RUNTIMES = ("node", "python", "osascript", "curl", "deno", "bun", "security")
 PROC_RULES = [
     (re.compile(r"\s-e\s.*global\s*\[\s*['\"]\w+['\"]\s*\]\s*=.*require"), "inline loader (node -e global[...] = require)"),
     (re.compile(r"\.node_modules/\.npm-ws"), "~/.node_modules loader"),
-    (re.compile(r"95\.135\.181\.151|166\.88\.54\.158"), "talks to a known C2 server"),
+    (re.compile(C2), "talks to a known C2 server"),
+    (re.compile(r"Request\._(V|target|sign)\s*="), "python stager (urllib Request._V / _target)"),
+    # Browsers read their own key through the Keychain API, never through /usr/bin/security.
+    (re.compile(r"^\S*security\s.*find-generic-password.*Safe Storage"), "reading a browser's Safe Storage key"),
 ]
 
 MARKER = re.compile(rb"global\s*\[\s*['\"]!['\"]\s*\]\s*=")
@@ -120,6 +127,8 @@ def check_tasks(text):
         tasks = json.loads(strip_jsonc(text)).get("tasks", [])
     except (ValueError, AttributeError):
         # Unparseable: fall back to the raw text so a broken file can't hide a task.
+        if "folderOpen" in text and re.search(r"/fonts/|\.(woff2?|ttf|otf|eot|lfk|lkf|llf|fml)\b", text, re.I):
+            return "unparseable folderOpen task that references a font file"
         tasks = [{"command": text, "runOptions": {"runOn": "folderOpen"}}] if "folderOpen" in text else []
     for t in tasks if isinstance(tasks, list) else []:
         if not isinstance(t, dict) or (t.get("runOptions") or {}).get("runOn") != "folderOpen":
@@ -140,7 +149,7 @@ def check(path, data):
     """Return a reason string if this file is the payload or its trigger, else None."""
     p = path.replace("\\", "/")
     if p.endswith(".vscode/tasks.json"):
-        return check_tasks(data.decode("utf-8", "replace"))
+        return check_tasks(data.decode("utf-8-sig", "replace"))  # the worm prepends a BOM so json.loads fails
     if p.endswith(".vscode/settings.json"):
         return "workspace setting re-enables auto-run tasks" if AUTO_TASKS_ON.search(data) else None
     ext = os.path.splitext(p)[1].lower()
@@ -442,6 +451,22 @@ def selftest():
     assert check("refs/plugin-api.d.ts", table) is None, "flagged a padded Markdown table in a doc comment"
     assert check("/Users/x/.node_modules/.npm-ws-runner.js", b"anything"), "missed loader file"
     assert check("tools/run.js", b'var c={"_t_s":"http://95.135.181.151:443"}'), "missed C2 marker"
+    # Oct 2026 variant: BOM-prefixed tasks.json with node in "command" and the fake font in "args".
+    bom_tasks = (b'\xef\xbb\xbf{"version":"2.0.0","tasks":[{"label":"eslint-check","type":"shell","command":"node",'
+                 b'"args":["./public/fonts/fa-solid-300.ttf"],"runOptions":{"runOn":"folderOpen"}}]}')
+    assert check(".vscode/tasks.json", bom_tasks), "missed BOM-prefixed tasks.json"
+    assert check(".vscode/tasks.json", bom_tasks[:-3]), "missed unparseable task pointing at a font"
+    whole = b"\t" * 700 + b"function y7(R,c,e,r,t,i,s,_0xdf6eg){for(var n=[],o=274987^274987;o<R.length;o++)n.push(R)}"
+    assert check("api.js", whole), "missed file that is entirely an off-screen payload"
+    assert check("src/x.js", b"const u='http://91.218.183.174:443';"), "missed Oct 2026 C2"
+    ps2 = (
+        "  201     1 /Users/x/.pyenv/versions/3.10.13/bin/python3 -u -c import sys;from urllib.request import Request;"
+        "Request._V='A8-n*';Request._target='http://1.2.3.4'\n"
+        "  202   201 /usr/bin/security -q find-generic-password -w -a Chromium -s Chromium Safe Storage\n"
+        "  203     1 /usr/bin/security find-identity -v -p codesigning\n"
+    )
+    flagged = {pid for pid, _ in suspicious_processes(ps2, me=0)}
+    assert flagged == {201, 202}, f"stealer rules picked {sorted(flagged)}"
     print("fontguard selftest: ok")
     return 0
 

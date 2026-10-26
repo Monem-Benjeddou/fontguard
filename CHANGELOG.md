@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1
+
+Catches the October 2026 variant, which slipped past 1.1.0:
+
+- A `.vscode/tasks.json` that starts with a UTF-8 byte-order mark is now parsed. The worm adds the BOM so the file fails to parse, then puts `node` in `command` and the fake font in `args`.
+- A `tasks.json` that still won't parse is flagged if it has a `folderOpen` task that mentions a font file.
+- A JS/TS file that starts with 150+ blank characters is flagged. The worm now ships whole-file payloads (`api.js`) that begin with hundreds of tabs.
+- Added the C2 servers seen in September and October: 193.247.144.38, 194.11.226.41, 166.88.134.75, 91.218.183.174.
+- The process rules now stop the Python stager (`Request._V=` / `Request._target=`), and any `security find-generic-password` call for a browser's Safe Storage key. That call is how the stealer gets at saved browser passwords.
+
 ## 1.1.0
 
 - Starts at login through a login item the app registers itself (`SMAppService`). It appears under System Settings › General › Login Items, and the Overview shows whether it is enabled, with a button to fix it.
