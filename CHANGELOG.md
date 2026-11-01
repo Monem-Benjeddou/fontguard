@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.2
+
+From the published October 2026 samples (PolinRider / GhostAction):
+
+- Any text file in a `fonts` folder is flagged unless it is a normal text asset (`.svg`, `.css`, `.md`...). The worm keeps changing the fake font's extension; the latest is `.orc` (`css/public/fonts/fa-brand-400.orc`).
+- Off-screen padding is caught from 120 blank characters, down from 150. Published samples pad by 120+.
+- Files that mention the stealer's upload path `/verify-human/` are flagged.
+- `procs` flags the macOS stealer's keychain theft: `security dump-keychain`, and `find-generic-password -w` / `find-internet-password -w` for GitHub, GitLab, Bitbucket and Atlassian.
+
 ## 1.1.1
 
 Catches the October 2026 variant, which slipped past 1.1.0:

@@ -32,16 +32,20 @@ import subprocess
 import sys
 import time
 
-__version__ = "1.1.1"
+__version__ = "1.1.2"
 
 FONT_EXTS = {".woff", ".woff2", ".ttf", ".otf", ".eot"}
-ODD_EXTS = {".lfk", ".lkf", ".llf", ".fml"}
+ODD_EXTS = {".lfk", ".lkf", ".llf", ".fml", ".orc"}
+# Text files that really do live in font folders. Any other text file there is a payload, whatever
+# its extension: the worm rotates them (.woff2, .lfk, .orc...).
+FONT_DIR_TEXT_OK = {".svg", ".css", ".scss", ".sass", ".less", ".md", ".txt", ".json", ".html",
+                    ".xml", ".map", ".py", ".license", ""}
 SCRIPT_EXTS = {".js", ".mjs", ".cjs", ".ts"}
 CODE_EXTS = {".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx"}
 # Variant 2: payload appended to a config file after hundreds of tabs/spaces, off-screen in editors.
 # The gap must follow code on the same line (`);<tabs>payload`): deep indentation at the start
 # of a line is normal in formatted SDKs. Padded Markdown tables in doc comments end in "|".
-HIDDEN_CODE = re.compile(rb"\S[ \t]{150,}[^\s|*/][^\n]{19,}"
+HIDDEN_CODE = re.compile(rb"\S[ \t]{120,}[^\s|*/][^\n]{19,}"  # published samples pad 120+
                          rb"|\A[ \t]{150,}\S[^\n]{19,}")  # whole file is the payload: no source starts with 150 blanks
 # Shorter padding (50+) is enough when the worm's bootstrap follows it; on a line of its own
 # only the unmistakable global/eval bootstrap counts.
@@ -51,7 +55,7 @@ HIDDEN_BOOTSTRAP = re.compile(rb"\S[ \t]{50,}(global\s*(\.|\[)|eval\s*\(|require
 # the published write-up: 166.88.54.158).
 C2 = (r"95\.135\.181\.151|166\.88\.54\.158|193\.247\.144\.38|194\.11\.226\.41"
       r"|166\.88\.134\.75|91\.218\.183\.174")
-LOADER = re.compile(rb"npm-ws|" + C2.encode() + rb"|trongrid\.io|bsc-dataseed|_\$_1e42"
+LOADER = re.compile(rb"npm-ws|/verify-human/|" + C2.encode() + rb"|trongrid\.io|bsc-dataseed|_\$_1e42"
                     rb"|global\s*\[\s*['\"](_V|_t_t)['\"]\s*\]|global\.i\s*=\s*['\"]A\d")
 # A committed workspace setting that switches folderOpen auto-run back on.
 AUTO_TASKS_ON = re.compile(rb"\"task\.allowAutomaticTasks\"\s*:\s*(true|\"on\")")
@@ -72,6 +76,11 @@ PROC_RULES = [
     (re.compile(r"Request\._(V|target|sign)\s*="), "python stager (urllib Request._V / _target)"),
     # Browsers read their own key through the Keychain API, never through /usr/bin/security.
     (re.compile(r"^\S*security\s.*find-generic-password.*Safe Storage"), "reading a browser's Safe Storage key"),
+    # The macOS stealer dumps the keychain, then reads each git host's password with -w.
+    (re.compile(r"^\S*security\s+(-\S+\s+)*dump-keychain"), "dumping the keychain"),
+    (re.compile(r"^\S*security\s.*find-(generic|internet)-password\s.*-w"
+                r".*(github|gitlab|bitbucket|atlassian|git:)", re.IGNORECASE),
+     "reading a git host password from the keychain"),
 ]
 
 MARKER = re.compile(rb"global\s*\[\s*['\"]!['\"]\s*\]\s*=")
@@ -89,7 +98,7 @@ def is_candidate(path):
     p = path.replace("\\", "/")
     ext = os.path.splitext(p)[1].lower()
     return (p.endswith((".vscode/tasks.json", ".vscode/settings.json")) or ext in FONT_EXTS
-            or ext in ODD_EXTS or ext in CODE_EXTS or "/.node_modules/.npm-ws" in p)
+            or ext in ODD_EXTS or ext in CODE_EXTS or "/.node_modules/.npm-ws" in p or "/fonts/" in "/" + p)
 
 
 def strip_jsonc(s):
@@ -158,6 +167,9 @@ def check(path, data):
         return "malware loader file in ~/.node_modules"
     if (ext in FONT_EXTS or ext in ODD_EXTS) and head and b"\x00" not in head:
         return f"text file disguised as a font ({ext})"
+    if ("/fonts/" in "/" + p and ext not in FONT_DIR_TEXT_OK and ext not in CODE_EXTS
+            and head and b"\x00" not in head):
+        return f"text file in a fonts folder ({ext})"
     if MARKER.search(data[:65536]):
         return "payload marker global['!'] ="
     if LOADER.search(data):
@@ -467,6 +479,21 @@ def selftest():
     )
     flagged = {pid for pid, _ in suspicious_processes(ps2, me=0)}
     assert flagged == {201, 202}, f"stealer rules picked {sorted(flagged)}"
+    # Published Oct 2026 samples: .orc fake font under css/public/fonts, 120-blank padding, git keychain theft.
+    assert check("css/public/fonts/fa-brand-400.orc", b"var a=[55,12];new TextDecoder().decode(x)"), "missed .orc font"
+    assert check("assets/fonts/fa-x.qzv", b"global['!'] = '9-10474';"), "missed unknown extension in fonts dir"
+    for ok in ("fonts/README.md", "public/fonts/fa-regular-400.svg", "src/fonts/boxicons.scss", "kit/fonts/repair.py"):
+        assert check(ok, b"<svg>legit text asset</svg>") is None, f"flagged {ok}"
+    assert check("public/fonts/real.woff2", b"wOF2\x00\x01" + b"\x00" * 32) is None, "flagged a real font"
+    assert check("vite.config.js", b"export default {};" + b" " * 125 + b"var _0x5dfb=['a','b','c'];x()"), "missed 120 padding"
+    assert check("tools/x.py.js", b"fetch('http://1.2.3.4/verify-human/BRW')"), "missed verify-human endpoint"
+    ps3 = (
+        "  301     1 /usr/bin/security dump-keychain\n"
+        "  302     1 /usr/bin/security -q find-generic-password -w -a Monem -s git:https://github.com\n"
+        "  303     1 /usr/bin/security find-generic-password -s 'Wi-Fi'\n"
+    )
+    flagged = {pid for pid, _ in suspicious_processes(ps3, me=0)}
+    assert flagged == {301, 302}, f"keychain rules picked {sorted(flagged)}"
     print("fontguard selftest: ok")
     return 0
 
