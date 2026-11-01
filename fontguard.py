@@ -36,10 +36,12 @@ __version__ = "1.1.2"
 
 FONT_EXTS = {".woff", ".woff2", ".ttf", ".otf", ".eot"}
 ODD_EXTS = {".lfk", ".lkf", ".llf", ".fml", ".orc"}
-# Text files that really do live in font folders. Any other text file there is a payload, whatever
-# its extension: the worm rotates them (.woff2, .lfk, .orc...).
+# Text files that really do live in font folders. Any other text file there that reads like
+# JavaScript is a payload, whatever its extension: the worm rotates them (.woff2, .lfk, .orc...).
+# Font metrics (.afm, .ufm) and Python stubs (.pyi) are text too, but never JavaScript.
 FONT_DIR_TEXT_OK = {".svg", ".css", ".scss", ".sass", ".less", ".md", ".txt", ".json", ".html",
-                    ".xml", ".map", ".py", ".license", ""}
+                    ".xml", ".map", ".py", ".pyi", ".license", ""}
+JS_LIKE = re.compile(rb"\b(function|var|const|let)\b|require\s*\(|eval\s*\(|global\s*[\[.]|TextDecoder|=>")
 SCRIPT_EXTS = {".js", ".mjs", ".cjs", ".ts"}
 CODE_EXTS = {".js", ".mjs", ".cjs", ".ts", ".mts", ".cts", ".jsx", ".tsx"}
 # Variant 2: payload appended to a config file after hundreds of tabs/spaces, off-screen in editors.
@@ -168,7 +170,7 @@ def check(path, data):
     if (ext in FONT_EXTS or ext in ODD_EXTS) and head and b"\x00" not in head:
         return f"text file disguised as a font ({ext})"
     if ("/fonts/" in "/" + p and ext not in FONT_DIR_TEXT_OK and ext not in CODE_EXTS
-            and head and b"\x00" not in head):
+            and head and b"\x00" not in head and JS_LIKE.search(head)):
         return f"text file in a fonts folder ({ext})"
     if MARKER.search(data[:65536]):
         return "payload marker global['!'] ="
@@ -484,6 +486,10 @@ def selftest():
     assert check("assets/fonts/fa-x.qzv", b"global['!'] = '9-10474';"), "missed unknown extension in fonts dir"
     for ok in ("fonts/README.md", "public/fonts/fa-regular-400.svg", "src/fonts/boxicons.scss", "kit/fonts/repair.py"):
         assert check(ok, b"<svg>legit text asset</svg>") is None, f"flagged {ok}"
+    afm = b"StartFontMetrics 4.1\nFontName Helvetica\nC 32 ; WX 278 ; N space ; B 0 0 0 0 ;\n"
+    assert check("matplotlib/mpl-data/fonts/afm/phvr8a.afm", afm) is None, "flagged font metrics (.afm)"
+    stub = b"from typing import Any\nimport numpy as np\ndef text(s: str) -> Any: ...\n"
+    assert check("stubs/vispy/util/fonts/_quartz.pyi", stub) is None, "flagged a Python stub (.pyi)"
     assert check("public/fonts/real.woff2", b"wOF2\x00\x01" + b"\x00" * 32) is None, "flagged a real font"
     assert check("vite.config.js", b"export default {};" + b" " * 125 + b"var _0x5dfb=['a','b','c'];x()"), "missed 120 padding"
     assert check("tools/x.py.js", b"fetch('http://1.2.3.4/verify-human/BRW')"), "missed verify-human endpoint"
