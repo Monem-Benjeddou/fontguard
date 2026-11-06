@@ -37,7 +37,9 @@ class HookInstall(unittest.TestCase):
     def setUp(self):
         self.home = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.home)
-        self.env = dict(os.environ, HOME=self.home, GIT_CONFIG_NOSYSTEM="1")
+        # APP_DIR too: uninstall.sh otherwise finds and deletes the real /Applications/Fontguard.app.
+        self.env = dict(os.environ, HOME=self.home, APP_DIR=self.home, FONTGUARD_TEST="1",
+                        GIT_CONFIG_NOSYSTEM="1")
         prev = os.path.join(self.home, "prevhooks")
         os.makedirs(prev)
         self.write_hook(os.path.join(prev, "pre-commit"), "prev-ran")

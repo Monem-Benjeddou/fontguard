@@ -8,8 +8,10 @@ BIN="$APP_DIR/Fontguard.app/Contents/MacOS/Fontguard"
 [ -x "$BIN" ] && "$BIN" --unregister-login >/dev/null 2>&1
 launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null
 rm -f "$HOME/Library/LaunchAgents/$LABEL.plist"   # installs older than 1.1 kept a plist here
-pkill -x Fontguard 2>/dev/null
-pkill -f "fontguard.py watch" 2>/dev/null
+if [ -z "$FONTGUARD_TEST" ]; then  # tests use a throwaway HOME but share this machine's processes
+  pkill -x Fontguard 2>/dev/null
+  pkill -f "fontguard.py watch" 2>/dev/null
+fi
 rm -rf "$APP_DIR/Fontguard.app"
 
 if [ "$(git config --global core.hooksPath)" = "$FG/hooks" ]; then
