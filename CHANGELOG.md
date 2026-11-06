@@ -8,6 +8,13 @@ From the published October 2026 samples (PolinRider / GhostAction):
 - Off-screen padding is caught from 120 blank characters, down from 150. Published samples pad by 120+.
 - Files that mention the stealer's upload path `/verify-human/` are flagged.
 - `procs` flags the macOS stealer's keychain theft: `security dump-keychain`, and `find-generic-password -w` / `find-internet-password -w` for GitHub, GitLab, Bitbucket and Atlassian.
+- Task rule reads the `osx`, `linux` and `windows` blocks, where the worm hides `curl | bash`, and flags any `folderOpen` task marked `hide` or `reveal: never`.
+- Flags the worm's push tool by name: `temp_auto_push.bat`, `temp_interactive_push.bat`, `branch_structure.json`.
+- `.vscode/settings.json` with `terminal.integrated.hideOnStartup: "always"` is flagged.
+- `.github/workflows/*.yml` files are scanned for known C2s and markers.
+- A 4,000+ character line in a `*.config.*` file is flagged. Newer builds drop the padding.
+- New markers: both obfuscator seeds, `/*RS260605*/`-style build tags, Ethereum and TRON dead-drop addresses, the Vercel C2 domains, and 193.32.204.199.
+- `procs` also checks the crontab and launchd plists: the `#ghc2` cron job, `com.launchkeeper.pkg-agent`, the `~/.node_modules` runner and known C2s.
 
 ## 1.1.1
 

